@@ -22,6 +22,22 @@ const uint32_t STRF = 'frts';
 const uint32_t DC00 = 'cd00';
 const uint32_t WB01 = 'bw10';
 
+typedef struct _avimainheader {
+    //uint32_t fcc;
+    //uint32_t  cb;
+    uint32_t dwMicroSecPerFrame;
+    uint32_t dwMaxBytesPerSec;
+    uint32_t dwPaddingGranularity;
+    uint32_t dwFlags;
+    uint32_t dwTotalFrames;
+    uint32_t dwInitialFrames;
+    uint32_t dwStreams;
+    uint32_t dwSuggestedBufferSize;
+    uint32_t dwWidth;
+    uint32_t dwHeight;
+    uint32_t dwReserved[4];
+} AVIMAINHEADER;
+
 typedef struct _avistreamheader {
     //uint32_t fcc;
     //uint32_t cb;
@@ -88,15 +104,16 @@ void store_byte(unsigned char b)
     vid_data.push_back(b);
 }
 
+std::vector<chunk_s> movi;
+std::vector<AVIINDEX> idx;
+uint32_t vid_frames = 0;
+uint32_t offset = 4;
 uint32_t read_chunks(std::ifstream& input, int32_t align, int32_t output_align, chunk_s& root)
 {
     static bool sh_vid_found = false;
     static bool sf_vid_found = false;
     static uint32_t width = 0;
     static uint32_t height = 0;
-    static uint32_t offset = 4;
-    static std::vector<AVIINDEX> idx;
-    static bool first = true;
 
     input.read((char*)&root.id, sizeof(root.id));
     input.read((char*)&root.size, sizeof(root.size));
@@ -106,17 +123,7 @@ uint32_t read_chunks(std::ifstream& input, int32_t align, int32_t output_align, 
         input.read((char*)&root.name, sizeof(root.name));
         for (uint32_t cnt = sizeof(root.name); cnt < root.size; ) {
             root.sub.emplace_back();
-            uint32_t size = read_chunks(input, align, output_align, root.sub.back());
-            if (root.sub.back().id == DC00) {
-                first = false;
-            }
-            if (first && root.sub.back().id == WB01) {
-                offset = 4;
-                idx.pop_back();
-                delete[] root.data;
-                root.sub.pop_back();
-            }
-            cnt += size;
+            cnt += read_chunks(input, align, output_align, root.sub.back());
         }
     }
     else {
@@ -142,30 +149,23 @@ uint32_t read_chunks(std::ifstream& input, int32_t align, int32_t output_align, 
             asf->biCompression = MJPG;
         }
         else if (root.id == DC00) {
+            vid_frames++;
             vid_data.clear();
             TooJpeg::writeJpeg(store_byte, root.data, width, height, true, 50);
             delete[] root.data;
 
             root.data = new char[vid_data.size()];
-            root.size = vid_data.size();
+            root.size = (uint32_t)vid_data.size();
             std::copy(vid_data.begin(), vid_data.end(), root.data);
 
+            movi.push_back(root);
             idx.emplace_back(root.id, 1, offset, compute_align(output_align, root.size));
             offset += idx.back().dwSize + 8;
         }
         else if (root.id == WB01) {
+            movi.push_back(root);
             idx.emplace_back(root.id, 1, offset, compute_align(output_align, root.size));
             offset += idx.back().dwSize + 8;
-        }
-        else if (root.id == IDX1) {
-            delete[] root.data;
-            root.data = new char[idx.size() * sizeof(AVIINDEX)];
-            char* ptr = root.data;
-
-            for (auto& ai : idx) {
-                std::copy((char*)&ai, ((char*)&ai) + sizeof(ai), ptr);
-                ptr += sizeof(ai);
-            }
         }
     }
 
@@ -193,7 +193,32 @@ void prune_chunks(int32_t align, chunk_s& root)
                 }
                 return true;
             }
+            if (x.id == AVIH) {
+                AVIMAINHEADER* ah = (AVIMAINHEADER*)x.data;
+                ah->dwTotalFrames = vid_frames;
+            }
+            if (x.id == IDX1) {
+                delete[] x.data;
+                x.data = new char[idx.size() * sizeof(AVIINDEX)];
+                char* ptr = x.data;
+                if (idx[0].dwChunkId == WB01) {
+                    std::swap(idx[0], idx[1]);
+                    idx[0].dwOffset = 4;
+                    idx[1].dwOffset = 4 + compute_align(align, idx[0].dwSize);
+                }
+                for (auto& ai : idx) {
+                    std::copy((char*)&ai, ((char*)&ai) + sizeof(ai), ptr);
+                    ptr += sizeof(ai);
+                }
+                x.size = (uint32_t)idx.size() * sizeof(AVIINDEX);
+            }
             if (x.id == LIST || x.id == RIFF) {
+                if (x.name == MOVI) {
+                    x.sub = movi;
+                    if (x.sub[0].id == WB01) {
+                        std::swap(x.sub[0], x.sub[1]);
+                    }
+                }
                 prune_chunks(align, x);
             }
             new_size += x.size + 8 + (compute_align(align, x.size) - x.size);
@@ -237,8 +262,13 @@ int main(int argc, char* argv[])
         output_align = argv[4][0] - '0';
     }
 
-    struct chunk_s root {};
+    chunk_s root {};
     read_chunks(input, input_align, output_align, root);
+    chunk_s avix{};
+    do {
+        avix.id = 0;
+        read_chunks(input, input_align, output_align, avix);
+    } while (avix.id);
     prune_chunks(output_align, root);
     write_chunks(output, output_align, root);
 

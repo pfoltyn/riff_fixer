@@ -646,8 +646,8 @@ bool writeJpeg(WRITE_ONE_BYTE output, const void* pixels_, unsigned short width,
             auto b = short(pixels[pixelPos + 2]) + pixels[right + 2] + pixels[down + 2] + pixels[downRight + 2];
 
             // convert to Cb and Cr
-            Cb[deltaY][deltaX] = rgb2cb(r, g, b) / 4; // I still have to divide r,g,b by 4 to get their average values
-            Cr[deltaY][deltaX] = rgb2cr(r, g, b) / 4; // it's a bit faster if done AFTER CbCr conversion
+            Cb[deltaY][deltaX] = rgb2cb((float)r, (float)g, (float)b) / 4; // I still have to divide r,g,b by 4 to get their average values
+            Cr[deltaY][deltaX] = rgb2cr((float)r, (float)g, (float)b) / 4; // it's a bit faster if done AFTER CbCr conversion
 
             // step forward to next 2x2 area
             pixelPos += 2*3; // 2 pixels => 6 bytes (2*numComponents)
