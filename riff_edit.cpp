@@ -247,19 +247,19 @@ void write_chunks(std::ofstream& output, int32_t align, chunk_s& root)
 
 int main(int argc, char* argv[])
 {
-    if (argc < 3) {
-        std::cout << "Usage: riff_edit input.avi output.avi 2 4\n";
+    if (argc < 2) {
+        std::cout << "Usage: riff_edit input.avi 2 4\n";
         return -1;
     }
 
     std::ifstream input(argv[1], std::ios::binary);
-    std::ofstream output(argv[2], std::ios::binary);
+    std::ofstream output(std::string(argv[1]) + ".avi", std::ios::binary);
 
     int32_t input_align = 2;
     int32_t output_align = 4;
-    if (argc == 5) {
-        input_align = argv[3][0] - '0';
-        output_align = argv[4][0] - '0';
+    if (argc == 4) {
+        input_align = argv[2][0] - '0';
+        output_align = argv[3][0] - '0';
     }
 
     chunk_s root {};
